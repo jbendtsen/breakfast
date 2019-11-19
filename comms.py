@@ -4,7 +4,6 @@ import select
 
 import serial
 
-# all methods here are called from the main thread, except ship() and run()
 class Comms(threading.Thread) :
 	def __init__(self, gui, iface) :
 		super(Comms, self).__init__()
@@ -38,9 +37,8 @@ class Comms(threading.Thread) :
 			if fd == self.iface.fd:
 				res = self.iface.read(byte, 1)
 				if res == 1:
-					self.main.add_byte(byte[0])
-					# print("{0:x}".format(byte[0]), end=' ')
-					# time.sleep(0.1)
+					self.main.append_byte(byte[0])
+
 			elif fd == self.readfd and self.package != None:
 				self.iface.write(self.package, len(self.package))
 				self.package = None
