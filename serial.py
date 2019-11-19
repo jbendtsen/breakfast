@@ -4,8 +4,8 @@ import termios
 import fcntl
 
 class Serial:
-	def __init__(self) :
-		Serial.dev = "/dev/ttyUSB0"
+	def __init__(self, dev="/dev/ttyUSB0") :
+		Serial.dev = dev
 		Serial.fd = -1
 		Serial.in_use = False
 
@@ -14,11 +14,11 @@ class Serial:
 			return Serial.fd
 
 		Serial.in_use = True
-		flags = os.O_RDWR | os.O_NOCTTY | os.O_SYNC
+		flags = os.O_RDWR | os.O_NONBLOCK | os.O_SYNC | os.O_NOCTTY
 
 		try:
 			Serial.fd = os.open(Serial.dev, flags)
-		except FileNotFoundError:
+		except FileNotFoundError as e:
 			Serial.fd = -1
 			Serial.in_use = False
 			return Serial.fd
