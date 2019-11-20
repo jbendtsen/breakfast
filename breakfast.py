@@ -1,11 +1,10 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog
 
-import threading
 import os
-import subprocess
-import shlex
 import sys
+import threading
+import subprocess
 
 import serial
 import comms
@@ -73,7 +72,7 @@ class Tab:
 			self.data = str2ba(self.main.recv.get("1.0", "end"))
 
 	def update(self) :
-		self.main.recv.configure(state="normal")
+		self.main.recv.config(state="normal")
 		self.main.recv.delete("1.0", tk.END)
 
 		text = ""
@@ -104,7 +103,8 @@ class Tab:
 		self.main.recv.insert(tk.END, text)
 
 		editing = "disabled" if self.use_filter else "normal"
-		self.main.recv.configure(state=editing)
+		self.main.recv.config(state=editing)
+		self.main.load_btn.config(state=editing)
 
 		self.main.recv_lbl.config(text=label)
 
@@ -123,16 +123,16 @@ class Breakfast:
 		self.tab_strs.trace('w', self.select_tab_str)
 
 		self.tabs_om = tk.OptionMenu(master, self.tab_strs, name)
-		self.tabs_om.grid(row=0, column=0, columnspan=2, sticky="w")
+		self.tabs_om.grid(row=0, column=0, columnspan=3, sticky="w")
 
 		self.tab_add_btn = tk.Button(master, text="+", command=self.add_tab)
-		self.tab_add_btn.grid(row=0, column=2)
+		self.tab_add_btn.grid(row=0, column=3)
 
 		self.tab_del_btn = tk.Button(master, text="x", command=self.close_tab)
-		self.tab_del_btn.grid(row=0, column=3)
+		self.tab_del_btn.grid(row=0, column=4)
 
 		self.filter_lbl = tk.Label(text="Filter")
-		self.filter_lbl.grid(row=1, columnspan=4, sticky="w")
+		self.filter_lbl.grid(row=1, columnspan=5, sticky="w")
 
 		self.filter_cb_var = tk.IntVar()
 
@@ -144,30 +144,34 @@ class Breakfast:
 
 		self.filter_txt = tk.Entry(self.master, width=200, textvariable=self.filter_txt_var)
 		self.filter_txt.bind("<Return>", (lambda event: self.refresh()))
-		self.filter_txt.grid(row=2, column=1, columnspan=3)
+		self.filter_txt.grid(row=2, column=1, columnspan=4)
 
 		self.recv_lbl = tk.Label(self.master, text="Receiving (Edit Mode)")
-		self.recv_lbl.grid(row=3, columnspan=4, sticky="w")
+		self.recv_lbl.grid(row=3, columnspan=5, sticky="w")
 
 		self.recv = tk.Text(self.master, width=200, height=100)
 		self.recv.bind("<FocusOut>", lambda event: self.tabs[self.cur_tab].maybe_edit())
-		self.recv.grid(row=4, columnspan=4)
+		self.recv.bind("<Control-a>", self.recv_select_all)
+		self.recv.grid(row=4, columnspan=5)
+
+		self.load_btn = tk.Button(self.master, text="Load", command=self.load)
+		self.load_btn.grid(row=5, column=2)
 
 		self.save_btn = tk.Button(self.master, text="Save", command=self.save)
-		self.save_btn.grid(row=5, column=2)
+		self.save_btn.grid(row=5, column=3)
 
 		self.reply_btn = tk.Button(self.master, text="Reply", command=self.reply)
-		self.reply_btn.grid(row=5, column=3)
+		self.reply_btn.grid(row=5, column=4)
 
 		self.prompt_lbl = tk.Label(self.master, text="Command")
-		self.prompt_lbl.grid(row=6, columnspan=4, sticky="w")
+		self.prompt_lbl.grid(row=6, columnspan=5, sticky="w")
 
 		self.prompt = tk.Entry(self.master, width=200)
 		self.prompt.bind("<Key>", self.send_key_down)
-		self.prompt.grid(row=7, columnspan=3)
+		self.prompt.grid(row=7, columnspan=4)
 
 		self.send_btn = tk.Button(self.master, text="Send", command=self.send)
-		self.send_btn.grid(row=7, column=3)
+		self.send_btn.grid(row=7, column=4)
 
 		self.master.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -186,6 +190,10 @@ class Breakfast:
 	def send_key_down(self, e) :
 		if e.keysym == "Return" and (e.state & 1) == 0:
 			self.send()
+
+	def recv_select_all(self, *args) :
+		self.recv.tag_add("sel", "1.0", "end")
+		self.recv.focus_set()
 
 	def update_filter(self, *args) :
 		s = self.filter_txt_var.get()
@@ -265,6 +273,13 @@ class Breakfast:
 	def append_byte(self, byte) :
 		self.tabs[self.cur_tab].append_byte(byte)
 
+	def load(self) :
+		f = filedialog.askopenfile(mode="rb")
+		t = self.tabs[self.cur_tab]
+		t.data = f.read()
+		t.update()
+		f.close()
+
 	def save(self) :
 		t = self.tabs[self.cur_tab]
 		t.maybe_edit()
@@ -275,9 +290,7 @@ class Breakfast:
 			return
 
 		if t.use_filter:
-			#self.recv.configure(state="normal")
 			f.write(self.recv.get("1.0", "end"))
-			#self.recv.configure(state="disabled")
 		else:
 			f.write(t.data)
 
