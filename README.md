@@ -8,8 +8,8 @@ A tool for analysing and controlling serial devices in Unix
 * Edit recevied data in unfiltered mode
 
 ## Usage
-
-`python breakfast.py`
-`python breakfast.py /dev/ttyUSB1`
-
-The device used by default is `dev/ttyUSB0`.
+```
+python breakfast.py
+python breakfast.py /dev/ttyUSB1
+```
+The device used by default is `/dev/ttyUSB0`.
