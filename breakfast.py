@@ -59,6 +59,7 @@ class Tab:
 		self.main = gui
 		self.name = "Tab {0}".format(idx+1)
 		self.data = bytearray([])
+		self.flt_output = None
 		self.filter = ""
 		self.use_filter = False
 
@@ -68,8 +69,15 @@ class Tab:
 			self.main.recv.insert(tk.END, "{0:02x} ".format(byte))
 
 	def maybe_edit(self) :
-		if not self.use_filter :
+		if not self.use_filter:
 			self.data = str2ba(self.main.recv.get("1.0", "end"))
+
+	def overwrite_data(self) :
+		if not self.use_filter:
+			return
+
+		if self.flt_output != None and len(self.flt_output) > 0:
+			self.data = self.flt_output
 
 	def update(self) :
 		self.main.recv.config(state="normal")
@@ -86,7 +94,11 @@ class Tab:
 					proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 					proc.stdin.write(self.data)
 					proc.stdin.close()
-					text = proc.stdout.read().decode('cp437')
+
+					# To allow for overwriting our data later
+					self.flt_output = proc.stdout.read()
+
+					text = self.flt_output.decode('cp437')
 					text += "\n" + proc.stderr.read().decode('cp437')
 
 				except (FileNotFoundError, OSError) as e:
@@ -103,8 +115,11 @@ class Tab:
 		self.main.recv.insert(tk.END, text)
 
 		editing = "disabled" if self.use_filter else "normal"
+		filtered = "normal" if self.use_filter else "disabled"
+
 		self.main.recv.config(state=editing)
 		self.main.load_btn.config(state=editing)
+		self.main.ovw_btn.config(state=filtered)
 
 		self.main.recv_lbl.config(text=label)
 
@@ -123,16 +138,16 @@ class Breakfast:
 		self.tab_strs.trace('w', self.select_tab_str)
 
 		self.tabs_om = tk.OptionMenu(master, self.tab_strs, name)
-		self.tabs_om.grid(row=0, column=0, columnspan=3, sticky="w")
+		self.tabs_om.grid(row=0, column=0, columnspan=4, sticky="w")
 
 		self.tab_add_btn = tk.Button(master, text="+", command=self.add_tab)
-		self.tab_add_btn.grid(row=0, column=3)
+		self.tab_add_btn.grid(row=0, column=4)
 
 		self.tab_del_btn = tk.Button(master, text="x", command=self.close_tab)
-		self.tab_del_btn.grid(row=0, column=4)
+		self.tab_del_btn.grid(row=0, column=5)
 
 		self.filter_lbl = tk.Label(text="Filter")
-		self.filter_lbl.grid(row=1, columnspan=5, sticky="w")
+		self.filter_lbl.grid(row=1, columnspan=6, sticky="w")
 
 		self.filter_cb_var = tk.IntVar()
 
@@ -144,38 +159,42 @@ class Breakfast:
 
 		self.filter_txt = tk.Entry(self.master, width=200, textvariable=self.filter_txt_var)
 		self.filter_txt.bind("<Return>", (lambda event: self.refresh()))
-		self.filter_txt.grid(row=2, column=1, columnspan=4)
+		self.filter_txt.grid(row=2, column=1, columnspan=5)
 
 		self.recv_lbl = tk.Label(self.master, text="Receiving (Edit Mode)")
-		self.recv_lbl.grid(row=3, columnspan=5, sticky="w")
+		self.recv_lbl.grid(row=3, columnspan=6, sticky="w")
 
 		self.recv = tk.Text(self.master, width=200, height=100)
 		self.recv.bind("<FocusOut>", lambda event: self.tabs[self.cur_tab].maybe_edit())
 		self.recv.bind("<Control-a>", self.recv_select_all)
-		self.recv.grid(row=4, columnspan=5)
+		self.recv.grid(row=4, columnspan=6)
 
 		self.load_btn = tk.Button(self.master, text="Load", command=self.load)
-		self.load_btn.grid(row=5, column=2)
+		self.load_btn.grid(row=5, column=0)
 
 		self.save_btn = tk.Button(self.master, text="Save", command=self.save)
-		self.save_btn.grid(row=5, column=3)
+		self.save_btn.grid(row=5, column=1)
+
+		self.ovw_btn = tk.Button(self.master, text="Overwrite", command=self.overwrite)
+		self.ovw_btn.grid(row=5, column=3)
 
 		self.reply_btn = tk.Button(self.master, text="Reply", command=self.reply)
-		self.reply_btn.grid(row=5, column=4)
+		self.reply_btn.grid(row=5, column=4, columnspan=2)
 
 		self.prompt_lbl = tk.Label(self.master, text="Command")
-		self.prompt_lbl.grid(row=6, columnspan=5, sticky="w")
+		self.prompt_lbl.grid(row=6, columnspan=6, sticky="w")
 
 		self.prompt = tk.Entry(self.master, width=200)
 		self.prompt.bind("<Key>", self.send_key_down)
 		self.prompt.grid(row=7, columnspan=4)
 
 		self.send_btn = tk.Button(self.master, text="Send", command=self.send)
-		self.send_btn.grid(row=7, column=4)
+		self.send_btn.grid(row=7, column=4, columnspan=2)
 
 		self.master.protocol("WM_DELETE_WINDOW", self.close)
 
 		self.init = True
+		self.refresh()
 
 		self.comms = comms.Comms(self, iface)
 		self.comms.start()
@@ -275,6 +294,9 @@ class Breakfast:
 
 	def load(self) :
 		f = filedialog.askopenfile(mode="rb")
+		if f is None:
+			return
+
 		t = self.tabs[self.cur_tab]
 		t.data = f.read()
 		t.update()
@@ -296,6 +318,9 @@ class Breakfast:
 
 		f.close()
 
+	def overwrite(self) :
+		self.tabs[self.cur_tab].overwrite_data()
+
 	def reply(self) :
 		t = self.tabs[self.cur_tab]
 		t.maybe_edit()
@@ -315,7 +340,7 @@ if interface.open() <= 0:
 else:
 	root = tk.Tk()
 	root.grid_rowconfigure(4, weight=1) # receiving window row
-	root.grid_columnconfigure(1, weight=1)
+	root.grid_columnconfigure(2, weight=1) # text/entry column
 	root.geometry("400x400")
 	gui = Breakfast(root, interface)
 	root.mainloop()
