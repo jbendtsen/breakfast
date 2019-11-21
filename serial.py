@@ -1,12 +1,11 @@
 import os
-import sys
 import termios
-import fcntl
 
 class Serial:
 	def __init__(self, dev="/dev/ttyUSB0") :
 		Serial.dev = dev
 		Serial.fd = -1
+		Serial.dummy = False
 		Serial.in_use = False
 
 	def open(self) :
@@ -22,8 +21,6 @@ class Serial:
 			Serial.fd = -1
 			Serial.in_use = False
 			return Serial.fd
-
-		# fcntl.fcntl(Serial.fd, fcntl.F_SETFL, fcntl.O_NONBLOCK)
 
 		# simple terminal mode
 		cflags = termios.CRTSCTS | termios.CLOCAL | termios.CREAD
@@ -42,15 +39,21 @@ class Serial:
 			0,        # ospeed
 			cc        # cc
 		]
-		termios.tcsetattr(Serial.fd, termios.TCSANOW, tio)
+		try:
+			termios.tcsetattr(Serial.fd, termios.TCSANOW, tio)
+		except termios.error:
+			Serial.dummy = True
 
 		Serial.in_use = False
 		self.flush()
 		return Serial.fd
 
 	def flush(self) :
-		if (Serial.fd >= 0 and not Serial.in_use) :
-			termios.tcflush(Serial.fd, termios.TCIOFLUSH)
+		if Serial.fd >= 0 and not Serial.in_use:
+			try:
+				termios.tcflush(Serial.fd, termios.TCIOFLUSH)
+			except termios.error:
+				pass
 
 	def close(self) :
 		if Serial.in_use:
@@ -60,12 +63,6 @@ class Serial:
 			os.close(Serial.fd)
 
 		Serial.fd = -1
-
-	def plunge(self) :
-		# send a fake byte to the file descriptor, such that it may unblock a call to read()
-		print("Before ioctl")
-		fcntl.ioctl(Serial.fd, termios.TIOCSTI, bytes([0]))
-		print("After ioctl")
 
 	def read(self, buf, size, block_size = 0xf800) :
 		return self.transfer(buf, size, block_size, 0)

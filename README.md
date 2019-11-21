@@ -13,3 +13,5 @@ python breakfast.py
 python breakfast.py /dev/ttyUSB1
 ```
 The device used by default is `/dev/ttyUSB0`.
+
+To use this tool without a device, pass in `/dev/null`.
