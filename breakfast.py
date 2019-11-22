@@ -77,18 +77,23 @@ class Breakfast:
 			self.comms.close()
 			self.comms.join()
 
+		for t in self.tabs:
+			if t.macro_running() :
+				t.macro_thread.join()
+
 		self.master.destroy()
 
 	def key_press(self, e) :
 		if (e.state & 4) == 0:
+			self.tabs[self.cur_tab].try_macro(e)
 			return
 
 		if e.keysym == "o":
 			self.load()
+			return "break"
 		elif e.keysym == "s":
 			self.save()
-
-		return "break"
+			return "break"
 
 	def send_key_down(self, e) :
 		# Make sure the Shift key is not held. If not, we can send our command

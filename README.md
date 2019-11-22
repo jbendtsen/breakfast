@@ -4,6 +4,7 @@ A tool for analysing and controlling serial devices in Unix
 ## Features
 * Send and receive data asynchronously
 * Pipe incoming data through a shell command, which provides a "filter"
+* Macros, directly embedded in the source using Python exec()
 * Multiple tabs, each containing their own received data and filter
 * Edit recevied data in unfiltered mode
 
