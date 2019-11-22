@@ -1,199 +1,72 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog
 
-import os
 import sys
 import threading
-import subprocess
 
 import serial
 import comms
+import tabs
+import utils
 
-def str2ba(string) :
-	buf = bytearray()
-	idx = 0
-
-	for c in string:
-		val = ord(c)
-
-		# if the current character is not a hex digit [0-9a-fA-F],
-		#  then try the next character
-		if not (val >= 0x30 and val <= 0x39) \
-			and not (val >= 0x41 and val <= 0x46) \
-			and not (val >= 0x61 and val <= 0x66) :
-			continue
-
-		if (idx % 2 == 0) :
-			buf.append(int(c, 16))
-		else:
-			buf[-1] = (buf[-1] << 4) | int(c, 16)
-
-		idx += 1
-
-	return buf
-
-def ba2str(buf) :
-	length = len(buf) * 3
-	text = [' '] * length
-
-	idx = 0
-	for b in buf:
-		d = b >> 4
-		if d >= 0xa:
-			text[idx] = chr(87 + d)
-		else:
-			text[idx] = chr(48 + d)
-
-		d = b & 0xf
-		if d >= 0xa:
-			text[idx+1] = chr(87 + d)
-		else:
-			text[idx+1] = chr(48 + d)
-
-		idx += 3
-
-	return "".join(text)
-
-class Tab:
-	def __init__(self, gui, idx) :
-		self.main = gui
-		self.name = "Tab {0}".format(idx+1)
-		self.data = bytearray([])
-		self.flt_output = None
-		self.filter = ""
-		self.use_filter = False
-
-	def append_byte(self, byte) :
-		self.data.append(byte)
-		if not self.use_filter:
-			self.main.recv.insert(tk.END, "{0:02x} ".format(byte))
-
-	def maybe_edit(self) :
-		if not self.use_filter:
-			self.data = str2ba(self.main.recv.get("1.0", "end"))
-
-	def overwrite_data(self) :
-		if not self.use_filter:
-			return
-
-		if self.flt_output != None and len(self.flt_output) > 0:
-			self.data = self.flt_output
-
-	def update(self) :
-		self.main.recv.config(state="normal")
-		self.main.recv.delete("1.0", tk.END)
-
-		text = ""
-		label = ""
-		if self.use_filter:
-			cmd = self.filter
-
-			# if a filter was given, use it as a shell command and provide our data to stdin
-			if len(cmd) > 0:
-				try:
-					proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-					proc.stdin.write(self.data)
-					proc.stdin.close()
-
-					# To allow for overwriting our data later
-					self.flt_output = proc.stdout.read()
-
-					text = self.flt_output.decode('cp437')
-					text += "\n" + proc.stderr.read().decode('cp437')
-
-				except (FileNotFoundError, OSError) as e:
-					text = "Filter Error: {0}".format(e)
-			# otherwise treat our data as straight-up ASCII
-			else:
-				text = self.data.decode('cp437')
-
-			label = "Receiving (Filtered Mode)"
-		else:
-			text = ba2str(self.data)
-			label = "Receiving (Edit Mode)"
-
-		self.main.recv.insert(tk.END, text)
-
-		editing = "disabled" if self.use_filter else "normal"
-		filtered = "normal" if self.use_filter else "disabled"
-
-		self.main.recv.config(state=editing)
-		self.main.load_btn.config(state=editing)
-		self.main.ovw_btn.config(state=filtered)
-
-		self.main.recv_lbl.config(text=label)
+dataTypes = [
+	"Data", "Results", "Macro"
+]
 
 class Breakfast:
 	def __init__(self, master, iface) :
-		self.init = False
 		self.master = master
+
+		self.menu = tk.Menu(self.master)
+
+		self.file_menu = tk.Menu(self.menu, tearoff=0)
+		self.file_menu.add_command(label="Open", command=self.load)
+		self.file_menu.add_command(label="Save", command=self.save)
+
+		self.tab_menu = tk.Menu(self.menu, tearoff=0)
+
+		self.menu.add_cascade(label="File", menu=self.file_menu)
+		self.menu.add_cascade(label="Tabs", menu=self.tab_menu)
+
+		self.master.config(menu=self.menu)
+		self.master.bind("<Key>", self.key_press)
+
+		self.tab_strs = tk.StringVar()
+		self.tab_strs.trace('w', self.select_tab_str)
+
+		editing_btn = tk.Button(self.master, text=tabs.modeNames[tabs.EDIT], command=lambda: self.switch_mode(tabs.EDIT))
+		filtered_btn = tk.Button(self.master, text=tabs.modeNames[tabs.FILTER], command=lambda: self.switch_mode(tabs.FILTER))
+		macro_btn = tk.Button(self.master, text=tabs.modeNames[tabs.MACRO], command=lambda: self.switch_mode(tabs.MACRO))
+
+		editing_btn.grid(row=1, column=0)
+		filtered_btn.grid(row=1, column=1)
+		macro_btn.grid(row=1, column=2, sticky="w")
+
+		self.mode_btns = [editing_btn, filtered_btn, macro_btn]
+
+		self.tab_add_btn = tk.Button(self.master, text="+", command=self.add_tab)
+		self.tab_add_btn.grid(row=1, column=4)
+
+		self.tab_del_btn = tk.Button(self.master, text="x", command=self.close_tab)
+		self.tab_del_btn.grid(row=1, column=5)
 
 		self.tabs = []
 		self.n_created_tabs = 0
+		self.cur_tab = 0
 		self.add_tab()
 
-		self.tab_strs = tk.StringVar()
-		name = self.tabs[0].name
-		self.tab_strs.set(name)
-		self.tab_strs.trace('w', self.select_tab_str)
-
-		self.tabs_om = tk.OptionMenu(master, self.tab_strs, name)
-		self.tabs_om.grid(row=0, column=0, columnspan=4, sticky="w")
-
-		self.tab_add_btn = tk.Button(master, text="+", command=self.add_tab)
-		self.tab_add_btn.grid(row=0, column=4)
-
-		self.tab_del_btn = tk.Button(master, text="x", command=self.close_tab)
-		self.tab_del_btn.grid(row=0, column=5)
-
-		self.filter_lbl = tk.Label(text="Filter")
-		self.filter_lbl.grid(row=1, columnspan=6, sticky="w")
-
-		self.filter_cb_var = tk.IntVar()
-
-		self.filter_cb = tk.Checkbutton(self.master, padx=10, variable=self.filter_cb_var, command=self.toggle_filter)
-		self.filter_cb.grid(row=2)
-
-		self.filter_txt_var = tk.StringVar()
-		self.filter_txt_var.trace("w", self.update_filter)
-
-		self.filter_txt = tk.Entry(self.master, width=200, textvariable=self.filter_txt_var)
-		self.filter_txt.bind("<Return>", (lambda event: self.refresh()))
-		self.filter_txt.grid(row=2, column=1, columnspan=5)
-
-		self.recv_lbl = tk.Label(self.master, text="Receiving (Edit Mode)")
-		self.recv_lbl.grid(row=3, columnspan=6, sticky="w")
-
-		self.recv = tk.Text(self.master, width=200, height=100)
-		self.recv.bind("<FocusOut>", lambda event: self.tabs[self.cur_tab].maybe_edit())
-		self.recv.bind("<Control-a>", self.recv_select_all)
-		self.recv.grid(row=4, columnspan=6)
-
-		self.load_btn = tk.Button(self.master, text="Load", command=self.load)
-		self.load_btn.grid(row=5, column=0)
-
-		self.save_btn = tk.Button(self.master, text="Save", command=self.save)
-		self.save_btn.grid(row=5, column=1)
-
-		self.ovw_btn = tk.Button(self.master, text="Overwrite", command=self.overwrite)
-		self.ovw_btn.grid(row=5, column=3)
-
-		self.reply_btn = tk.Button(self.master, text="Reply", command=self.reply)
-		self.reply_btn.grid(row=5, column=4, columnspan=2)
-
 		self.prompt_lbl = tk.Label(self.master, text="Command")
-		self.prompt_lbl.grid(row=6, columnspan=6, sticky="w")
+		self.prompt_lbl.grid(row=10, columnspan=6, sticky="w")
 
 		self.prompt = tk.Entry(self.master, width=200)
 		self.prompt.bind("<Key>", self.send_key_down)
-		self.prompt.grid(row=7, columnspan=4)
+		self.prompt.grid(row=11, columnspan=4)
 
 		self.send_btn = tk.Button(self.master, text="Send", command=self.send)
-		self.send_btn.grid(row=7, column=4, columnspan=2)
+		self.send_btn.grid(row=11, column=4, columnspan=2)
 
 		self.master.protocol("WM_DELETE_WINDOW", self.close)
 
-		self.init = True
 		self.refresh()
 
 		self.comms = comms.Comms(self, iface)
@@ -206,30 +79,25 @@ class Breakfast:
 
 		self.master.destroy()
 
+	def key_press(self, e) :
+		if (e.state & 4) == 0:
+			return
+
+		if e.keysym == "o":
+			self.load()
+		elif e.keysym == "s":
+			self.save()
+
+		return "break"
+
 	def send_key_down(self, e) :
+		# Make sure the Shift key is not held. If not, we can send our command
 		if e.keysym == "Return" and (e.state & 1) == 0:
 			self.send()
 
-	def recv_select_all(self, *args) :
-		self.recv.tag_add("sel", "1.0", "end")
-		self.recv.focus_set()
-
-	def update_filter(self, *args) :
-		s = self.filter_txt_var.get()
-		self.tabs[self.cur_tab].filter = s
-
-	def toggle_filter(self) :
-		tab = self.tabs[self.cur_tab]
-		tab.maybe_edit()
-		tab.use_filter = self.filter_cb_var.get() == 1
-		tab.update()
-
 	def refresh_tab_list(self) :
-		if not self.init:
-			return
-
-		menu = self.tabs_om["menu"]
-		menu.delete(0, tk.END)
+		menu = self.tab_menu
+		menu.delete(0, "end")
 		for t in self.tabs:
 			menu.add_command(label=t.name, command=(lambda value=t.name: self.tab_strs.set(value)))
 
@@ -242,24 +110,57 @@ class Breakfast:
 				return
 			idx += 1
 
+		# World's best error handling right here
 		print("Could not find " + name)
 
+	def remove_tabframe(self) :
+		t = self.tabs[self.cur_tab]
+		t.frame[t.mode].grid_remove()
+
+		self.mode_btns[t.mode].config(relief="raised")
+
+	def apply_tabframe(self) :
+		t = self.tabs[self.cur_tab]
+		t.frame[t.mode].grid(row=2, columnspan=6, rowspan=5)
+
+		self.mode_btns[t.mode].config(relief="sunken")
+
+		self.master.grid_rowconfigure(2, weight=1)
+		self.master.grid_columnconfigure(3, weight=1)
+
+		open_mode = "disabled" if t.mode == tabs.FILTER else "normal"
+		self.file_menu.entryconfig(0, label="Open "+dataTypes[t.mode], state=open_mode)
+		self.file_menu.entryconfig(1, label="Save "+dataTypes[t.mode])
+
+	def switch_mode(self, mode) :
+		t = self.tabs[self.cur_tab]
+		t.update_model()
+
+		self.remove_tabframe()
+		t.mode = mode
+		self.apply_tabframe()
+
+		self.refresh()
+
 	def select_tab(self, idx) :
+		self.tabs[self.cur_tab].update_model()
+
+		self.remove_tabframe()
 		self.cur_tab = idx
-		self.master.title("Breakfast - " + self.tabs[idx].name)
+		self.apply_tabframe()
+
 		self.refresh()
 
 	def add_tab(self) :
 		tab_id = self.n_created_tabs
 		self.n_created_tabs += 1
 
-		t = Tab(self, tab_id)
+		t = tabs.Tab(self, tab_id)
 		self.tabs.append(t)
 
 		self.select_tab(len(self.tabs) - 1)
 
-		if self.init:
-			self.tab_strs.set(self.tabs[self.cur_tab].name)
+		self.tab_strs.set(self.tabs[self.cur_tab].name)
 
 	def close_tab(self) :
 		if len(self.tabs) <= 1:
@@ -274,60 +175,63 @@ class Breakfast:
 
 		self.select_tab(idx)
 
-		if self.init:
-			self.tab_strs.set(self.tabs[self.cur_tab].name)
+		self.tab_strs.set(self.tabs[self.cur_tab].name)
 
 	def refresh(self) :
-		if not self.init:
-			return
-
 		t = self.tabs[self.cur_tab]
 		t.update()
-
-		self.filter_txt_var.set(t.filter)
-		self.filter_cb_var.set(1 if t.use_filter else 0)
-
 		self.refresh_tab_list()
+
+		self.master.title("Breakfast - " + t.name + " (" + t.mode_name() + ")")
+		#self.filter_txt_var.set(t.filter)
 
 	def append_byte(self, byte) :
 		self.tabs[self.cur_tab].append_byte(byte)
 
 	def load(self) :
-		f = filedialog.askopenfile(mode="rb")
+		t = self.tabs[self.cur_tab]
+		if t.mode == tabs.FILTER:
+			messagebox.showinfo("Read-only mode", "Filtered mode is read-only, opening data here is unsupported")
+			return
+
+		fmode = "rb" if t.mode == tabs.EDIT else "r"
+		f = filedialog.askopenfile(mode=fmode)
 		if f is None:
 			return
 
-		t = self.tabs[self.cur_tab]
-		t.data = f.read()
+		if t.mode == tabs.EDIT:
+			t.data = f.read()
+		elif t.mode == tabs.MACRO:
+			t.macro = f.read()
+
 		t.update()
 		f.close()
 
 	def save(self) :
 		t = self.tabs[self.cur_tab]
-		t.maybe_edit()
-		fmode = "w" if t.use_filter else "wb"
+		t.update_model()
+		fmode = "wb" if t.mode == tabs.EDIT else "w"
 
 		f = filedialog.asksaveasfile(mode=fmode)
 		if f is None:
 			return
 
-		if t.use_filter:
-			f.write(self.recv.get("1.0", "end"))
-		else:
+		if t.mode == tabs.EDIT:
 			f.write(t.data)
+		elif t.mode == tabs.FILTER:
+			f.write(t.frame[t.mode].recv.get("1.0", "end"))
+		elif t.mode == tabs.MACRO:
+			f.write(t.macro)
 
 		f.close()
 
-	def overwrite(self) :
-		self.tabs[self.cur_tab].overwrite_data()
-
 	def reply(self) :
 		t = self.tabs[self.cur_tab]
-		t.maybe_edit()
+		t.update_model()
 		self.comms.send(t.data)
 
 	def send(self) :
-		buf = str2ba(self.prompt.get())
+		buf = utils.str2ba(self.prompt.get())
 		self.comms.send(buf)
 
 dev = "/dev/ttyUSB0"
@@ -339,8 +243,6 @@ if interface.open() <= 0:
 	messagebox.showerror("Error", "Could not open serial device " + interface.dev + ": fd={0}".format(interface.fd))
 else:
 	root = tk.Tk()
-	root.grid_rowconfigure(4, weight=1) # receiving window row
-	root.grid_columnconfigure(2, weight=1) # text/entry column
 	root.geometry("400x400")
 	gui = Breakfast(root, interface)
 	root.mainloop()
