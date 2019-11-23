@@ -16,6 +16,7 @@ dataTypes = [
 class Breakfast:
 	def __init__(self, master, iface) :
 		self.master = master
+		self.binding_dlg = None
 
 		self.menu = tk.Menu(self.master)
 
@@ -29,7 +30,10 @@ class Breakfast:
 		self.menu.add_cascade(label="Tabs", menu=self.tab_menu)
 
 		self.master.config(menu=self.menu)
-		self.master.bind("<Key>", self.key_press)
+
+		self.keys_held = []
+		self.master.bind("<Key>", self.key_down)
+		self.master.bind("<KeyRelease>", self.key_up)
 
 		self.tab_strs = tk.StringVar()
 		self.tab_strs.trace('w', self.select_tab_str)
@@ -58,8 +62,7 @@ class Breakfast:
 		self.prompt_lbl = tk.Label(self.master, text="Command")
 		self.prompt_lbl.grid(row=10, columnspan=6, sticky="w")
 
-		self.prompt = tk.Entry(self.master, width=200)
-		self.prompt.bind("<Key>", self.send_key_down)
+		self.prompt = tk.Entry(self.master, width=200, name="prompt")
 		self.prompt.grid(row=11, columnspan=4)
 
 		self.send_btn = tk.Button(self.master, text="Send", command=self.send)
@@ -83,22 +86,53 @@ class Breakfast:
 
 		self.master.destroy()
 
-	def key_press(self, e) :
-		if (e.state & 4) == 0:
-			self.tabs[self.cur_tab].try_macro(e)
-			return
+	def clear_key(self, key) :
+		without = []
+		for k in self.keys_held:
+			if k != key:
+				without.append(k)
 
-		if e.keysym == "o":
-			self.load()
-			return "break"
-		elif e.keysym == "s":
-			self.save()
-			return "break"
+		self.keys_held = without
 
-	def send_key_down(self, e) :
-		# Make sure the Shift key is not held. If not, we can send our command
-		if e.keysym == "Return" and (e.state & 1) == 0:
-			self.send()
+	def key_down(self, e) :
+		key = e.keysym
+		self.clear_key(key)
+		self.keys_held.append(key)
+
+		# attempt to run each macro
+		for t in self.tabs:
+			if t.binding is None:
+				continue
+
+			if set(t.binding) == set(self.keys_held) :
+				self.keys_held = []
+				t.run_macro()
+				return "break"
+
+		shift_held = (e.state & 1) == 1
+		ctrl_held = (e.state & 4) == 4
+
+		if ctrl_held:
+			if e.keysym == "o":
+				self.keys_held = []
+				self.load()
+				return "break"
+			elif e.keysym == "s":
+				self.keys_held = []
+				self.save()
+				return "break"
+
+		wname = str(e.widget).split(".")[-1]  # Thanks Bryan
+		if wname == "prompt":
+			if key == "Return" and not shift_held:
+				self.send()
+		elif wname == "filter":
+			if key == "Return" and not shift_held:
+				self.tabs[self.cur_tab].update()
+
+	def key_up(self, e) :
+		# A bit of a hack
+		self.keys_held = []
 
 	def refresh_tab_list(self) :
 		menu = self.tab_menu

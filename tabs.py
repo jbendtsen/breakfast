@@ -32,7 +32,7 @@ class Tab:
 		self.data = bytearray([])
 		self.filter = ""
 		self.flt_output = None
-		self.binding = ""
+		self.binding = None
 		self.macro = ""
 		self.macro_thread = None
 		self.macro_event = threading.Event()
@@ -53,41 +53,40 @@ class Tab:
 		frame.grid_rowconfigure(3, weight=1)
 		frame.grid_columnconfigure(1, weight=1)
 
-		if mode != EDIT:
-			frame.head_lbl = tk.Label(frame, text=head_label)
-			frame.head_lbl.grid(row=0, columnspan=7, sticky="w")
+		if mode == FILTER:
+			self.filter_lbl = tk.Label(frame, text=head_label)
+			self.filter_lbl.grid(row=0, columnspan=7, sticky="w")
 
-			frame.head_var = tk.StringVar()
-			frame.head_var.trace("w", self.update_heading)
+			self.filter_var = tk.StringVar()
+			self.filter_var.trace("w", self.update_heading)
 
-			frame.head_ent = tk.Entry(frame, width=200, textvariable=frame.head_var)
-			frame.head_ent.bind("<Return>", (lambda event: self.update()))
-			frame.head_ent.grid(row=1, columnspan=7)
-		else:
-			frame.head_ent = None
+			self.filter_ent = tk.Entry(frame, width=200, textvariable=self.filter_var, name="filter")
+			#self.filter_ent.bind("<Return>", (lambda event: self.update()))
+			self.filter_ent.grid(row=1, columnspan=7)
 
 		frame.recv_lbl = tk.Label(frame, text=recv_label)
 		frame.recv_lbl.grid(row=2, columnspan=6, sticky="w")
 
 		frame.recv = tk.Text(frame, width=200, height=100)
-		frame.recv.bind("<Control-Key>", self.main.key_press)
+		frame.recv.bind("<Control-Key>", self.main.key_down)
 		frame.recv.bind("<FocusOut>", lambda event: self.update_model())
 		frame.recv.grid(row=3, columnspan=7)
 
-		frame.action_btn = None
 		if mode == EDIT:
-			frame.action_btn = tk.Button(frame, text="Reply", command=self.reply)
-			frame.clear_btn = tk.Button(frame, text="Clear", command=self.clear_data)
-			frame.action_btn.grid(row=4, column=4)
-			frame.clear_btn.grid(row=4, column=5, columnspan=2)
+			self.reply_btn = tk.Button(frame, text="Reply", command=self.reply)
+			self.clear_btn = tk.Button(frame, text="Clear", command=self.clear_data)
+			self.reply_btn.grid(row=4, column=4)
+			self.clear_btn.grid(row=4, column=5, columnspan=2)
 		elif mode == FILTER:
-			frame.action_btn = tk.Button(frame, text="Overwrite", command=self.overwrite_data)
-			frame.action_btn.grid(row=4, column=4)
+			self.overwrite_btn = tk.Button(frame, text="Overwrite", command=self.overwrite_data)
+			self.overwrite_btn.grid(row=4, column=4)
 		elif mode == MACRO:
-			frame.action_btn = tk.Button(frame, text="Execute", command=self.run_macro)
-			frame.cancel_btn = tk.Button(frame, text="Cancel", state="disabled", command=self.cancel_macro)
-			frame.action_btn.grid(row=4, column=4)
-			frame.cancel_btn.grid(row=4, column=5, columnspan=2)
+			self.binding_btn = tk.Button(frame, text="Binding", command=self.prompt_binding)
+			self.action_btn = tk.Button(frame, text="Execute", command=self.run_macro)
+			self.cancel_btn = tk.Button(frame, text="Cancel", state="disabled", command=self.cancel_macro)
+			self.binding_btn.grid(row=4, column=0)
+			self.action_btn.grid(row=4, column=4)
+			self.cancel_btn.grid(row=4, column=5, columnspan=2)
 
 		return frame
 
@@ -97,9 +96,6 @@ class Tab:
 
 		# shouldn't get here
 		return self.mode
-
-	def macro_running(self) :
-		return self.macro_thread is not None and self.macro_thread.is_alive()
 
 	def append_byte(self, byte) :
 		self.data.append(byte)
@@ -128,13 +124,6 @@ class Tab:
 		self.update_model()
 		self.main.comms.send(self.data)
 
-	def overwrite_data(self) :
-		if self.mode != FILTER:
-			return
-
-		if self.flt_output != None and len(self.flt_output) > 0:
-			self.set_data(self.flt_output)
-
 	def clear_data(self) :
 		self.frame[EDIT].recv.delete("1.0", "end")
 		self.data = []
@@ -143,6 +132,22 @@ class Tab:
 		self.frame[EDIT].recv.delete("1.0", "end")
 		self.data = data
 		self.frame[EDIT].recv.insert("end", utils.ba2str(self.data))
+
+	def overwrite_data(self) :
+		if self.mode != FILTER:
+			return
+
+		if self.flt_output != None and len(self.flt_output) > 0:
+			self.set_data(self.flt_output)
+
+	def prompt_binding(self) :
+		if self.main.binding_dlg is not None:
+			return
+
+		self.main.binding_dlg = macro.BindingDialog(self)
+
+	def macro_running(self) :
+		return self.macro_thread is not None and self.macro_thread.is_alive()
 
 	def run_macro(self) :
 		self.update_model()
@@ -155,24 +160,12 @@ class Tab:
 			self.macro_thread = macro.Macro(self.main, self)
 			self.macro_thread.start()
 
-	def try_macro(self, e) :
-		textbox = self.frame[self.mode].head_ent
-		if textbox is not None and self.main.master.focus_get() == textbox:
-			return
-
-		if e.keysym.lower() == self.binding.lower() :
-			self.run_macro()
-
 	def cancel_macro(self) :
 		if self.macro_running() :
 			self.macro_thread.kill()
 
 	def update_heading(self, *args) :
-		text = self.frame[self.mode].head_var.get()
-		if self.mode == FILTER:
-			self.filter = text
-		elif self.mode == MACRO:
-			self.binding = text
+		self.filter = self.filter_var.get()
 
 	def run_filter(self) :
 		text = ""
