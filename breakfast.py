@@ -278,10 +278,14 @@ if len(sys.argv) > 1:
 	dev = sys.argv[1]
 
 interface = serial.Serial(dev)
-if interface.open() <= 0:
-	messagebox.showerror("Error", "Could not open serial device " + interface.dev + ": fd={0}".format(interface.fd))
-else:
-	root = tk.Tk()
-	root.geometry("400x400")
-	gui = Breakfast(root, interface)
-	root.mainloop()
+try:
+	res = interface.open()
+	if res <= 0:
+		messagebox.showerror("Error", "Could not open device \"{0}\" ({1})".format(dev, res))
+	else:
+		root = tk.Tk()
+		root.geometry("400x400")
+		gui = Breakfast(root, interface)
+		root.mainloop()
+except PermissionError:
+	messagebox.showerror("Error", "Inadequate permissions for opening device \"{0}\"".format(dev))

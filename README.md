@@ -3,10 +3,10 @@ A tool for analysing and controlling serial devices in Unix
 
 ## Features
 * Send and receive data asynchronously
-* Pipe incoming data through a shell command, which provides a "filter"
-* Macros, directly embedded in the source using Python exec()
-* Multiple tabs, each containing their own received data and filter
-* Edit recevied data in unfiltered mode
+* Pipe incoming data through shell command (filter)
+* Macros (in Python) for custom functionality
+* Optional key binding for each macro
+* Multiple tabs, each with their own data, filter and macro
 
 ## Usage
 ```
