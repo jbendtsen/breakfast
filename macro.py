@@ -6,6 +6,8 @@ import queue
 import ctypes
 import time
 
+import struct
+
 EDIT_TAB   = 0
 FILTER_TAB = 1
 MACRO_TAB  = 2
@@ -80,7 +82,7 @@ class Macro(threading.Thread) :
 			try:
 				data.append(self.queue.get(timeout=timeout))
 			except queue.Empty:
-				return data
+				return None
 
 		return data
 

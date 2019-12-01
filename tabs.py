@@ -35,7 +35,6 @@ class Tab:
 		self.binding = None
 		self.macro = ""
 		self.macro_thread = None
-		self.macro_event = threading.Event()
 
 	def init_frame(self, root, mode) :
 		head_label = ""
@@ -118,6 +117,9 @@ class Tab:
 		if self.mode == EDIT:
 			self.data = utils.str2ba(content)
 		elif self.mode == MACRO:
+			if content[-1] == '\n':
+				content = content[0:-1]
+
 			self.macro = content
 
 	def reply(self) :
@@ -126,7 +128,7 @@ class Tab:
 
 	def clear_data(self) :
 		self.frame[EDIT].recv.delete("1.0", "end")
-		self.data = []
+		self.data = bytearray([])
 
 	def set_data(self, data) :
 		self.frame[EDIT].recv.delete("1.0", "end")

@@ -82,6 +82,7 @@ class Breakfast:
 
 		for t in self.tabs:
 			if t.macro_running() :
+				t.macro_thread.kill()
 				t.macro_thread.join()
 
 		self.master.destroy()
