@@ -3,6 +3,7 @@ from tkinter import messagebox, filedialog
 
 import sys
 import threading
+import re
 
 import serial
 import comms
@@ -10,7 +11,7 @@ import tabs
 import utils
 
 dataTypes = [
-	"Data", "Results", "Macro"
+	"Data", "Macro"
 ]
 
 class Breakfast:
@@ -38,15 +39,13 @@ class Breakfast:
 		self.tab_strs = tk.StringVar()
 		self.tab_strs.trace('w', self.select_tab_str)
 
-		editing_btn = tk.Button(self.master, text=tabs.modeNames[tabs.EDIT], command=lambda: self.switch_mode(tabs.EDIT))
-		filtered_btn = tk.Button(self.master, text=tabs.modeNames[tabs.FILTER], command=lambda: self.switch_mode(tabs.FILTER))
+		data_btn = tk.Button(self.master, text=tabs.modeNames[tabs.DATA], command=lambda: self.switch_mode(tabs.DATA))
 		macro_btn = tk.Button(self.master, text=tabs.modeNames[tabs.MACRO], command=lambda: self.switch_mode(tabs.MACRO))
 
-		editing_btn.grid(row=1, column=0)
-		filtered_btn.grid(row=1, column=1)
-		macro_btn.grid(row=1, column=2, sticky="w")
+		data_btn.grid(row=1, column=0)
+		macro_btn.grid(row=1, column=1, sticky="w")
 
-		self.mode_btns = [editing_btn, filtered_btn, macro_btn]
+		self.mode_btns = [data_btn, macro_btn]
 
 		self.tab_add_btn = tk.Button(self.master, text="+", command=self.add_tab)
 		self.tab_add_btn.grid(row=1, column=4)
@@ -57,7 +56,8 @@ class Breakfast:
 		self.tabs = []
 		self.n_created_tabs = 0
 		self.cur_tab = 0
-		self.add_tab()
+
+		self.res_prompt = ""
 
 		self.prompt_lbl = tk.Label(self.master, text="Command")
 		self.prompt_lbl.grid(row=10, columnspan=6, sticky="w")
@@ -70,12 +70,14 @@ class Breakfast:
 
 		self.master.protocol("WM_DELETE_WINDOW", self.close)
 
-		self.refresh()
+		# self.refresh()
 
 		self.comms = comms.Comms(self, iface)
 		self.comms.start()
 
 	def close(self) :
+		self.res_prompt = self.prompt.get()
+
 		if self.comms != None:
 			self.comms.close()
 			self.comms.join()
@@ -84,6 +86,8 @@ class Breakfast:
 			if t.macro_running() :
 				t.macro_thread.kill()
 				t.macro_thread.join()
+
+			t.update_model()
 
 		self.master.destroy()
 
@@ -153,11 +157,13 @@ class Breakfast:
 		# World's best error handling right here
 		print("Could not find " + name)
 
-	def remove_tabframe(self) :
+	def remove_tabframes(self) :
 		t = self.tabs[self.cur_tab]
-		t.frame[t.mode].grid_remove()
-
-		self.mode_btns[t.mode].config(relief="raised")
+		i = 0
+		while i < 2:
+			t.frame[i].grid_remove()
+			self.mode_btns[i].config(relief="raised")
+			i += 1
 
 	def apply_tabframe(self) :
 		t = self.tabs[self.cur_tab]
@@ -168,24 +174,31 @@ class Breakfast:
 		self.master.grid_rowconfigure(2, weight=1)
 		self.master.grid_columnconfigure(3, weight=1)
 
-		open_mode = "disabled" if t.mode == tabs.FILTER else "normal"
-		self.file_menu.entryconfig(0, label="Open "+dataTypes[t.mode], state=open_mode)
+		self.file_menu.entryconfig(0, label="Open "+dataTypes[t.mode])
 		self.file_menu.entryconfig(1, label="Save "+dataTypes[t.mode])
 
 	def switch_mode(self, mode) :
+		if self.cur_tab >= len(self.tabs) :
+			return
+
 		t = self.tabs[self.cur_tab]
 		t.update_model()
 
-		self.remove_tabframe()
+		self.remove_tabframes()
 		t.mode = mode
 		self.apply_tabframe()
 
 		self.refresh()
 
-	def select_tab(self, idx) :
-		self.tabs[self.cur_tab].update_model()
+	def select_tab(self, idx, remove=True) :
+		try:
+			self.tabs[self.cur_tab].update_model()
+		except IndexError:
+			pass
 
-		self.remove_tabframe()
+		if remove:
+			self.remove_tabframes()
+
 		self.cur_tab = idx
 		self.apply_tabframe()
 
@@ -206,6 +219,7 @@ class Breakfast:
 		if len(self.tabs) <= 1:
 			return
 
+		self.remove_tabframes()
 		idx = self.cur_tab
 		self.tabs.pop(idx)
 
@@ -213,7 +227,7 @@ class Breakfast:
 		if idx >= count:
 			idx = count-1
 
-		self.select_tab(idx)
+		self.select_tab(idx, False)
 
 		self.tab_strs.set(self.tabs[self.cur_tab].name)
 
@@ -230,16 +244,13 @@ class Breakfast:
 
 	def load(self) :
 		t = self.tabs[self.cur_tab]
-		if t.mode == tabs.FILTER:
-			messagebox.showinfo("Read-only mode", "Filtered mode is read-only, opening data here is unsupported")
-			return
 
-		fmode = "rb" if t.mode == tabs.EDIT else "r"
+		fmode = "rb" if t.mode == tabs.DATA else "r"
 		f = filedialog.askopenfile(mode=fmode)
 		if f is None:
 			return
 
-		if t.mode == tabs.EDIT:
+		if t.mode == tabs.DATA:
 			t.data = f.read()
 		elif t.mode == tabs.MACRO:
 			t.macro = f.read()
@@ -250,20 +261,24 @@ class Breakfast:
 	def save(self) :
 		t = self.tabs[self.cur_tab]
 		t.update_model()
-		fmode = "wb" if t.mode == tabs.EDIT else "w"
+		fmode = "wb" if t.mode == tabs.DATA else "w"
 
 		f = filedialog.asksaveasfile(mode=fmode)
 		if f is None:
 			return
 
-		if t.mode == tabs.EDIT:
+		if t.mode == tabs.DATA:
 			f.write(t.data)
-		elif t.mode == tabs.FILTER:
-			f.write(t.frame[t.mode].recv.get("1.0", "end"))
+		#elif t.mode == tabs.FILTER:
+		#	f.write(t.frame[t.mode].recv.get("1.0", "end"))
 		elif t.mode == tabs.MACRO:
 			f.write(t.macro)
 
 		f.close()
+
+	#def overwrite(self) :
+	#	t = self.tabs[self.cur_tab]
+	#	t.overwrite_data()
 
 	def reply(self) :
 		t = self.tabs[self.cur_tab]
@@ -274,19 +289,151 @@ class Breakfast:
 		buf = utils.str2ba(self.prompt.get())
 		self.comms.send(buf)
 
-dev = "/dev/ttyUSB0"
-if len(sys.argv) > 1:
-	dev = sys.argv[1]
+	def load_session(self) :
+		f = None
+		try:
+			f = open(sys.path[0] + "/.tabs", "rb")
+		except FileNotFoundError:
+			self.add_tab()
+			return
 
-interface = serial.Serial(dev)
-try:
-	res = interface.open()
+		buf = f.read()
+		f.close()
+
+		def get_next_line(b, idx) :
+			end = b.find(bytes([0x0a]), idx)
+			if end == -1:
+				end = len(b)
+
+			s = b[idx:end].decode('cp437')
+
+			info = list([end + 1])
+			info.extend(re.split(r' +', s, 1))
+			return info
+
+		curtab = 0
+		nexttab = 1
+
+		idx = 0
+		while idx < len(buf) :
+			line = get_next_line(buf, idx)
+			idx = line[0]
+			key = line[1]
+
+			try:
+				value = line[2]
+			except:
+				continue
+
+			#print(line[1:])
+			if key == "prompt":
+				self.prompt.insert("end", value)
+			elif key == "curtab":
+				curtab = int(value)
+			elif key == "nexttab":
+				nexttab = int(value)
+			elif key == "tab":
+				self.add_tab()
+				self.tabs[-1].name = value
+			elif key == "filter":
+				t = self.tabs[-1]
+				t.init_filter(value[2:], value[0] == '+')
+				t.update()
+			elif key == "mode":
+				mode = -1
+				if value == "data":
+					mode = tabs.DATA
+				elif value == "macro":
+					mode = tabs.MACRO
+				self.switch_mode(mode)
+			elif key == "data":
+				size = int(value)
+				if size > 0:
+					self.tabs[-1].data = buf[idx:idx+size]
+					self.tabs[-1].update()
+					idx += size
+			elif key == "macro":
+				size = int(value)
+				if size > 0:
+					self.tabs[-1].macro = buf[idx:idx+size]
+					self.tabs[-1].update()
+					idx += size
+			elif key == "binding":
+				self.tabs[-1].binding = value.split()
+
+		if len(self.tabs) == 0:
+			self.add_tab()
+		else:
+			self.n_created_tabs = nexttab
+			self.select_tab(curtab)
+
+	def save_session(self) :
+		f = open(sys.path[0] + "/.tabs", "wb")
+		info = "prompt {0}\ncurtab {1}\nnexttab {2}\n\n".format(self.res_prompt, self.cur_tab, self.n_created_tabs)
+		f.write(info.encode())
+		info = ""
+
+		def lazy_len(data) :
+			try:
+				l = len(data)
+			except:
+				l = 0
+			return l
+
+		for t in self.tabs:
+			flt_mode = "+" if t.is_filtered else "-"
+			data_len = lazy_len(t.data)
+			macro_len = lazy_len(t.macro)
+			try:
+				tab_mode = ("data", "macro")[t.mode]
+			except:
+				tab_mode = "?"
+
+			info += "tab {0}\nfilter {1} {2}\nmode {3}\ndata {4}\n".format(t.name, flt_mode, t.filter, tab_mode, data_len)
+			f.write(info.encode())
+			if data_len > 0:
+				f.write(t.data)
+				info = "\n"
+			else:
+				info = ""
+
+			if t.binding is not None and len(t.binding) > 0:
+				info += "binding " + " ".join(t.binding) + "\n"
+
+			info += "macro {0}\n".format(macro_len)
+			f.write(info.encode())
+			if macro_len > 0:
+				macro = t.macro.encode() if isinstance(t.macro, str) else t.macro
+				f.write(macro)
+				info = "\n\n"
+			else:
+				info = "\n"
+
+		f.close()
+
+def main() :
+	dev = "/dev/ttyUSB0"
+	if len(sys.argv) > 1:
+		dev = sys.argv[1]
+
+	interface = None
+	res = -1
+	try:
+		interface = serial.Serial(dev)
+		res = interface.open()
+	except PermissionError:
+		messagebox.showerror("Error", "Inadequate permissions for opening device \"{0}\"".format(dev))
+
 	if res <= 0:
 		messagebox.showerror("Error", "Could not open device \"{0}\" ({1})".format(dev, res))
-	else:
-		root = tk.Tk()
-		root.geometry("400x400")
-		gui = Breakfast(root, interface)
-		root.mainloop()
-except PermissionError:
-	messagebox.showerror("Error", "Inadequate permissions for opening device \"{0}\"".format(dev))
+		return
+
+	root = tk.Tk()
+	root.geometry("400x400")
+
+	gui = Breakfast(root, interface)
+	gui.load_session()
+	root.mainloop()
+	gui.save_session()
+
+main()

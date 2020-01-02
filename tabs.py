@@ -7,13 +7,11 @@ import threading
 import macro
 import utils
 
-EDIT = 0
-FILTER = 1
-MACRO = 2
+DATA = 0
+MACRO = 1
 
 modeNames = [
-	"Editing",
-	"Filtered",
+	"Data",
 	"Macro"
 ]
 
@@ -21,17 +19,17 @@ class Tab:
 	def __init__(self, gui, idx) :
 		self.main = gui
 		self.name = "Tab {0}".format(idx+1)
-		self.mode = EDIT
+		self.mode = DATA
 
 		self.frame = [
-			self.init_frame(self.main.master, EDIT),
-			self.init_frame(self.main.master, FILTER),
+			self.init_frame(self.main.master, DATA),
 			self.init_frame(self.main.master, MACRO)
 		]
 
 		self.data = bytearray([])
 		self.filter = ""
 		self.flt_output = None
+		self.is_filtered = False
 		self.binding = None
 		self.macro = ""
 		self.macro_thread = None
@@ -39,10 +37,8 @@ class Tab:
 	def init_frame(self, root, mode) :
 		head_label = ""
 		recv_label = ""
-		if mode == EDIT:
-			recv_label = "Receiving"
-		elif mode == FILTER:
-			head_label = "Filter"
+		if mode == DATA:
+			head_label = "  Filter  "
 			recv_label = "Receiving"
 		elif mode == MACRO:
 			head_label = "Binding"
@@ -50,35 +46,33 @@ class Tab:
 
 		frame = tk.Frame(root)
 		frame.grid_rowconfigure(3, weight=1)
-		frame.grid_columnconfigure(1, weight=1)
+		frame.grid_columnconfigure(2, weight=1)
 
-		if mode == FILTER:
-			self.filter_lbl = tk.Label(frame, text=head_label)
-			self.filter_lbl.grid(row=0, columnspan=7, sticky="w")
+		if mode == DATA:
+			self.flt_switch = tk.IntVar();
+			self.flt_switch.trace("w", self.toggle_filter)
+
+			self.filter_cb = tk.Checkbutton(frame, text=head_label, variable=self.flt_switch)
+			self.filter_cb.grid(row=0, column=0)
 
 			self.filter_var = tk.StringVar()
 			self.filter_var.trace("w", self.update_heading)
 
 			self.filter_ent = tk.Entry(frame, width=200, textvariable=self.filter_var, name="filter")
-			#self.filter_ent.bind("<Return>", (lambda event: self.update()))
-			self.filter_ent.grid(row=1, columnspan=7)
+			self.filter_ent.bind("<Return>", (lambda event: self.update()))
+			self.filter_ent.grid(row=0, column=2, columnspan=5)
 
 		frame.recv_lbl = tk.Label(frame, text=recv_label)
-		frame.recv_lbl.grid(row=2, columnspan=6, sticky="w")
+		frame.recv_lbl.grid(row=2, column=0, columnspan=7, sticky="w")
 
 		frame.recv = tk.Text(frame, width=200, height=100)
 		frame.recv.bind("<Control-Key>", self.main.key_down)
 		frame.recv.bind("<FocusOut>", lambda event: self.update_model())
-		frame.recv.grid(row=3, columnspan=7)
+		frame.recv.grid(row=3, column=0, columnspan=7, sticky="w")
 
-		if mode == EDIT:
-			self.reply_btn = tk.Button(frame, text="Reply", command=self.reply)
+		if mode == DATA:
 			self.clear_btn = tk.Button(frame, text="Clear", command=self.clear_data)
-			self.reply_btn.grid(row=4, column=4)
 			self.clear_btn.grid(row=4, column=5, columnspan=2)
-		elif mode == FILTER:
-			self.overwrite_btn = tk.Button(frame, text="Overwrite", command=self.overwrite_data)
-			self.overwrite_btn.grid(row=4, column=4)
 		elif mode == MACRO:
 			self.binding_btn = tk.Button(frame, text="Binding", command=self.prompt_binding)
 			self.action_btn = tk.Button(frame, text="Execute", command=self.run_macro)
@@ -90,7 +84,7 @@ class Tab:
 		return frame
 
 	def mode_name(self) :
-		if self.mode >= EDIT and self.mode <= MACRO:
+		if self.mode >= DATA and self.mode <= MACRO:
 			return modeNames[self.mode]
 
 		# shouldn't get here
@@ -101,20 +95,20 @@ class Tab:
 		if self.macro_running():
 			self.macro_thread.queue.put(byte)
 
-		if self.mode == EDIT:
-			self.frame[EDIT].recv.insert("end", "{0:02x} ".format(byte))
-		elif self.mode == FILTER and len(self.filter) == 0:
-			text = self.frame[FILTER].recv
+		if self.is_filtered and len(self.filter) == 0:
+			text = self.frame[DATA].recv
 			text.config(state="normal")
 			text.insert("end", bytes([byte]).decode('cp437'))
 			text.config(state="disabled")
+		elif not self.is_filtered:
+			self.frame[DATA].recv.insert("end", "{0:02x} ".format(byte))
 
 	def update_model(self) :
-		if self.mode == FILTER:
+		if self.is_filtered and self.mode == DATA:
 			return
 
 		content = self.frame[self.mode].recv.get("1.0", "end")
-		if self.mode == EDIT:
+		if self.mode == DATA:
 			self.data = utils.str2ba(content)
 		elif self.mode == MACRO:
 			if content[-1] == '\n':
@@ -127,16 +121,24 @@ class Tab:
 		self.main.comms.send(self.data)
 
 	def clear_data(self) :
-		self.frame[EDIT].recv.delete("1.0", "end")
+		self.frame[DATA].recv.delete("1.0", "end")
 		self.data = bytearray([])
 
 	def set_data(self, data) :
-		self.frame[EDIT].recv.delete("1.0", "end")
+		if data is None or not (isinstance(data, bytes) or isinstance(data, bytearray)) :
+			return
+
+		if not self.is_filtered:
+			self.frame[DATA].recv.delete("1.0", "end")
+			try:
+				self.frame[DATA].recv.insert("end", utils.ba2str(self.data))
+			except e:
+				messagebox.showerror("Error", e)
+
 		self.data = data
-		self.frame[EDIT].recv.insert("end", utils.ba2str(self.data))
 
 	def overwrite_data(self) :
-		if self.mode != FILTER:
+		if self.mode != DATA:
 			return
 
 		if self.flt_output != None and len(self.flt_output) > 0:
@@ -165,6 +167,16 @@ class Tab:
 	def cancel_macro(self) :
 		if self.macro_running() :
 			self.macro_thread.kill()
+
+	def init_filter(self, flt, enabled) :
+		value = 1 if enabled else 0
+		self.filter_var.set(flt)
+		self.flt_switch.set(value)
+
+	def toggle_filter(self, *args) :
+		self.update_model()
+		self.is_filtered = self.flt_switch.get() != 0
+		self.update()
 
 	def update_heading(self, *args) :
 		self.filter = self.filter_var.get()
@@ -203,12 +215,14 @@ class Tab:
 
 		text = ""
 		editing = "normal"
-		if mode == EDIT:
-			text = utils.ba2str(self.data)
-
-		elif mode == FILTER:
-			text = self.run_filter()
-			editing = "disabled"
+		if mode == DATA:
+			if self.is_filtered:
+				self.filter_ent.grid()
+				text = self.run_filter()
+				editing = "disabled"
+			else:
+				self.filter_ent.grid_remove()
+				text = utils.ba2str(self.data)
 
 		elif mode == MACRO:
 			text = self.macro

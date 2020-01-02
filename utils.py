@@ -1,4 +1,7 @@
 def str2ba(string) :
+	if not isinstance(string, str) :
+		return
+
 	buf = bytearray()
 	idx = 0
 
@@ -12,7 +15,7 @@ def str2ba(string) :
 			and not (val >= 0x61 and val <= 0x66) :
 			continue
 
-		if (idx % 2 == 0) :
+		if idx % 2 == 0:
 			buf.append(int(c, 16))
 		else:
 			buf[-1] = (buf[-1] << 4) | int(c, 16)
@@ -22,6 +25,9 @@ def str2ba(string) :
 	return buf
 
 def ba2str(buf) :
+	if not (isinstance(buf, bytes) or isinstance(buf, bytearray)) :
+		return
+
 	length = len(buf) * 3
 	text = [' '] * length
 

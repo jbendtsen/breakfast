@@ -8,9 +8,8 @@ import time
 
 import struct
 
-EDIT_TAB   = 0
-FILTER_TAB = 1
-MACRO_TAB  = 2
+DATA_TAB   = 0
+MACRO_TAB  = 1
 
 class BindingDialog:
 	def __init__(self, tab) :
