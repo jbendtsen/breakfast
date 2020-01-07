@@ -125,7 +125,7 @@ class Tab:
 		self.data = bytearray([])
 
 	def set_data(self, data) :
-		if data is None or not (isinstance(data, bytes) or isinstance(data, bytearray)) :
+		if not (isinstance(data, bytes) or isinstance(data, bytearray)) :
 			return
 
 		if not self.is_filtered:
@@ -135,7 +135,7 @@ class Tab:
 			except e:
 				messagebox.showerror("Error", e)
 
-		self.data = data
+		self.data = bytearray(data)
 
 	def overwrite_data(self) :
 		if self.mode != DATA:

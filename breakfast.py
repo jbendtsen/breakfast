@@ -251,7 +251,7 @@ class Breakfast:
 			return
 
 		if t.mode == tabs.DATA:
-			t.data = f.read()
+			t.data = bytearray(f.read())
 		elif t.mode == tabs.MACRO:
 			t.macro = f.read()
 
@@ -349,7 +349,7 @@ class Breakfast:
 			elif key == "data":
 				size = int(value)
 				if size > 0:
-					self.tabs[-1].data = buf[idx:idx+size]
+					self.tabs[-1].data = bytearray(buf[idx:idx+size])
 					self.tabs[-1].update()
 					idx += size
 			elif key == "macro":
