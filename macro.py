@@ -69,11 +69,18 @@ class Macro(threading.Thread) :
 		if th_id >= 0:
 			ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(th_id), ctypes.py_object(SystemExit))
 
+	def write(self, data) :
+		self.main.comms.send(data)
 	def write_bytes(self, *byte_tuple) :
 		self.main.comms.send(bytes(byte_tuple))
 
-	def write(self, data) :
-		self.main.comms.send(data)
+	def enqueue(self, data) :
+		self.main.comms.enqueue(data)
+	def enqueue_bytes(self, *byte_tuple) :
+		self.main.comms.enqueue(bytes(byte_tuple))
+
+	def submit(self) :
+		self.main.comms.update()
 
 	def read(self, count, timeout=None) :
 		data = bytearray([])

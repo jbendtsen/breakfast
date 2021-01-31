@@ -10,11 +10,13 @@ class Comms(threading.Thread) :
 		self.main = gui
 		self.iface = iface
 		self.running = False
+		self.packages = []
 
 		self.readfd, self.writefd = os.pipe()
 
 	# Write a byte to our writefd, which will unblock the call to select() inside run()
-	def interrupt(self) :
+	# This allows us to write data out (if len(packages) > 0) or exit this thread
+	def update(self) :
 		os.write(self.writefd, bytes([0]))
 
 	# Once our interrupt has been handled, we read the byte that we wrote
@@ -22,21 +24,27 @@ class Comms(threading.Thread) :
 	def clear(self) :
 		os.read(self.readfd, 1)
 
+	def enqueue(self, buf) :
+		if self.packages is None:
+			self.packages = [buf]
+		else:
+			self.packages.append(buf)
+
 	def send(self, buf) :
-		self.package = buf
-		self.interrupt()
+		self.enqueue(buf)
+		self.update()
 
 	def close(self) :
-		self.package = None
+		self.packages = []
 		self.running = False
-		self.interrupt()
+		self.update()
 
 	def run(self) :
 		self.running = True
 
 		byte = bytearray(1)
 		while (self.running) :
-			# Wait for either a byte from the serial's fd or from our own self-pipe (thanks to self.interrupt())
+			# Wait for either a byte from the serial's fd or from our own self-pipe (thanks to self.update())
 			fdset = [self.readfd]
 			if not self.iface.dummy:
 				fdset.append(self.iface.fd)
@@ -51,6 +59,12 @@ class Comms(threading.Thread) :
 
 			elif fd == self.readfd:
 				self.clear()
-				if self.package != None:
-					self.iface.write(self.package, len(self.package))
-					self.package = None
+
+				data = bytearray()
+				for buf in self.packages:
+					data.extend(buf)
+
+				if len(data) > 0:
+					self.iface.write(data, len(data))
+
+				self.packages = []
